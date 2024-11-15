@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isParent() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent';
+    }
+    
+    function isChild() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'child';
+    }
+    
+    function isParentOf(childId) {
+      return isParent() && 
+        get(/databases/$(database)/documents/users/$(childId)).data.parentId == request.auth.uid;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (isParent() && resource.data.parentId == request.auth.uid) ||
+        (isChild() && resource.data.parentId == userId)
+      );
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (isParent() && resource.data.parentId == request.auth.uid)
+      );
+      allow delete: if isParent() && resource.data.parentId == request.auth.uid;
+    }
+
+    // Tasks
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated() &&
+        (isParent() || 
+         isChild() && resource.data.assignedTo.hasAny([request.auth.uid]));
+      allow create: if isParent();
+      allow update: if isParent() || 
+        (isChild() && resource.data.assignedTo.hasAny([request.auth.uid]));
+      allow delete: if isParent();
+    }
+
+    // Rewards
+    match /rewards/{rewardId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isParent();
+    }
+
+    // Reward Claims
+    match /rewardClaims/{claimId} {
+      allow read: if isAuthenticated() && (
+        isParent() && resource.data.parentId == request.auth.uid ||
+        isChild() && resource.data.childId == request.auth.uid
+      );
+      allow create: if isAuthenticated();
+      allow update: if isParent() && resource.data.parentId == request.auth.uid;
+    }
+
+    // Activity
+    match /activity/{activityId} {
+      allow read: if isAuthenticated() && (
+        isParent() || 
+        isChild() && resource.data.childId == request.auth.uid
+      );
+      allow create: if isAuthenticated();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
